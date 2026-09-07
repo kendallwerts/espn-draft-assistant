@@ -11,6 +11,8 @@ jobs:
     env:
       ESPN_LEAGUE_ID: ${{ vars.ESPN_LEAGUE_ID }}
       ESPN_SEASON: '2026'
+      ESPN_S2: ${{ secrets.ESPN_S2 }}
+      ESPN_SWID: ${{ secrets.ESPN_SWID }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
