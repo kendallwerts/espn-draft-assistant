@@ -1,0 +1,35 @@
+name: Test ESPN Draft Assistant
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      ESPN_LEAGUE_ID: ${{ vars.ESPN_LEAGUE_ID }}
+      ESPN_SEASON: '2026'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Verify league ID variable is present
+        run: |
+          if [ -z "$ESPN_LEAGUE_ID" ]; then
+            echo "ESPN_LEAGUE_ID repository variable is not set"
+            exit 1
+          fi
+          echo "ESPN_LEAGUE_ID is configured"
+
+      - name: Fetch ESPN draft state
+        run: python draft_state.py
