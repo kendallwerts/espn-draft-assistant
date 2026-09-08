@@ -11,6 +11,7 @@ jobs:
     env:
       ESPN_LEAGUE_ID: ${{ vars.ESPN_LEAGUE_ID }}
       ESPN_SEASON: '2026'
+      ESPN_TEAM_ID: '13'
       ESPN_S2: ${{ secrets.ESPN_S2 }}
       ESPN_SWID: ${{ secrets.ESPN_SWID }}
     steps:
@@ -38,3 +39,6 @@ jobs:
 
       - name: Fetch ESPN draft state
         run: poetry run python draft_state.py
+
+      - name: Show Kendall roster
+        run: poetry run python team_report.py
