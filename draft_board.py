@@ -18,7 +18,7 @@ if not LEAGUE_ID:
     raise SystemExit("Missing ESPN_LEAGUE_ID")
 
 LEAGUE_URL = (
-    f"https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/"
+    f"https://fantasy.espn.com/apis/v3/games/ffl/"
     f"seasons/{SEASON}/segments/0/leagues/{LEAGUE_ID}"
 )
 
@@ -32,10 +32,25 @@ def cookies() -> dict[str, str] | None:
 def get_json(url: str, *, params=None, headers=None) -> Any:
     request_headers = {
         "Accept": "application/json",
-        "User-Agent": "espn-draft-assistant/0.2",
+        "User-Agent": "espn-draft-assistant/0.3",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
     }
     if headers:
         request_headers.update(headers)
+
+    if params is None:
+        params = {}
+    elif isinstance(params, list):
+        params = list(params)
+    else:
+        params = dict(params)
+
+    cache_buster = ("_ts", str(int(time.time() * 1000)))
+    if isinstance(params, list):
+        params.append(cache_buster)
+    else:
+        params[cache_buster[0]] = cache_buster[1]
 
     response = requests.get(
         url,
@@ -102,6 +117,7 @@ def normalize_player(entry: dict[str, Any]) -> dict[str, Any]:
             str(player.get("defaultPositionId", "?")),
         ),
         "injury": player.get("injuryStatus", "ACTIVE"),
+        "on_team_id": entry.get("onTeamId") or pool.get("onTeamId") or 0,
         "adp": float(adp),
         "percent_owned": float(
             ownership.get("percentOwned") or pool.get("percentOwned") or 0
@@ -119,12 +135,20 @@ def current_state() -> dict[str, Any]:
         draft.get("picks") or [],
         key=lambda pick: pick.get("overallPickNumber", 99999),
     )
+
     drafted_ids = {
         pick.get("playerId")
         for pick in picks
         if pick.get("playerId") not in (None, -1, 0)
     }
-    available = [player for player in players if player["id"] not in drafted_ids]
+    rostered_ids = {
+        player["id"]
+        for player in players
+        if player.get("id") and player.get("on_team_id") not in (None, 0, -1)
+    }
+    unavailable_ids = drafted_ids | rostered_ids
+
+    available = [player for player in players if player["id"] not in unavailable_ids]
     available.sort(
         key=lambda player: (
             player["adp"],
@@ -132,6 +156,7 @@ def current_state() -> dict[str, Any]:
             player["name"],
         )
     )
+
     next_open = next(
         (pick for pick in picks if pick.get("playerId") in (None, -1, 0)),
         None,
@@ -142,12 +167,15 @@ def current_state() -> dict[str, Any]:
         if pick.get("teamId") == TEAM_ID
         and pick.get("playerId") in (None, -1, 0)
     ]
+
     return {
         "teams": teams,
         "draft": draft,
         "picks": picks,
         "by_id": by_id,
         "drafted_ids": drafted_ids,
+        "rostered_ids": rostered_ids,
+        "unavailable_ids": unavailable_ids,
         "available": available,
         "next_open": next_open,
         "my_open_picks": my_open_picks,
@@ -162,7 +190,8 @@ def print_board(state: dict[str, Any], top_n: int) -> None:
     print(
         f"Draft in progress: {draft.get('inProgress')} | "
         f"complete: {draft.get('drafted')} | "
-        f"drafted: {len(state['drafted_ids'])}"
+        f"draft picks seen: {len(state['drafted_ids'])} | "
+        f"rostered players seen: {len(state['rostered_ids'])}"
     )
 
     next_open = state["next_open"]
@@ -208,15 +237,18 @@ def print_board(state: dict[str, Any], top_n: int) -> None:
 
 
 def watch(interval: int, top_n: int) -> None:
-    previous_drafted: set[int] | None = None
+    previous_signature: tuple[frozenset[int], frozenset[int]] | None = None
     while True:
         try:
             state = current_state()
-            drafted = set(state["drafted_ids"])
-            if drafted != previous_drafted:
+            signature = (
+                frozenset(state["drafted_ids"]),
+                frozenset(state["rostered_ids"]),
+            )
+            if signature != previous_signature:
                 print("\033[2J\033[H", end="")
                 print_board(state, top_n)
-                previous_drafted = drafted
+                previous_signature = signature
             if state["draft"].get("drafted"):
                 print("\nDraft is complete.")
                 return
