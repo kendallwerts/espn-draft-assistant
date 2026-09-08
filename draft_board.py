@@ -18,7 +18,7 @@ if not LEAGUE_ID:
     raise SystemExit("Missing ESPN_LEAGUE_ID")
 
 LEAGUE_URL = (
-    f"https://fantasy.espn.com/apis/v3/games/ffl/"
+    f"https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/"
     f"seasons/{SEASON}/segments/0/leagues/{LEAGUE_ID}"
 )
 
@@ -32,7 +32,7 @@ def cookies() -> dict[str, str] | None:
 def get_json(url: str, *, params=None, headers=None) -> Any:
     request_headers = {
         "Accept": "application/json",
-        "User-Agent": "espn-draft-assistant/0.3",
+        "User-Agent": "Mozilla/5.0 espn-draft-assistant/0.4",
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
     }
@@ -62,7 +62,16 @@ def get_json(url: str, *, params=None, headers=None) -> Any:
     if response.status_code in (401, 403):
         raise SystemExit("ESPN authentication failed. Refresh ESPN_S2 / ESPN_SWID.")
     response.raise_for_status()
-    return response.json()
+
+    try:
+        return response.json()
+    except requests.exceptions.JSONDecodeError as exc:
+        preview = response.text[:300].replace("\n", " ")
+        raise RuntimeError(
+            f"ESPN returned non-JSON content from {response.url} "
+            f"(status {response.status_code}, content-type={response.headers.get('content-type')!r}). "
+            f"Response starts with: {preview!r}"
+        ) from exc
 
 
 def fetch_league() -> dict[str, Any]:
