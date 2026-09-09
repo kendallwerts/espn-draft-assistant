@@ -1,0 +1,34 @@
+name: Weekly Fantasy Report
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Tuesday + Thursday mornings in US Central time (10 AM CDT / 9 AM CST)
+    - cron: '0 15 * * 2,4'
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    env:
+      ESPN_LEAGUE_ID: ${{ vars.ESPN_LEAGUE_ID }}
+      ESPN_SEASON: '2026'
+      ESPN_TEAM_ID: '13'
+      ESPN_S2: ${{ secrets.ESPN_S2 }}
+      ESPN_SWID: ${{ secrets.ESPN_SWID }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      - name: Install dependencies
+        run: poetry install
+
+      - name: Generate weekly fantasy report
+        run: poetry run python weekly_report.py
