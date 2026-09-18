@@ -24,6 +24,14 @@ POSITION_NAMES = {1: "QB", 2: "RB", 3: "WR", 4: "TE", 5: "K", 16: "D/ST"}
 SLOT_NAMES = {0: "QB", 2: "RB", 4: "WR", 6: "TE", 16: "D/ST", 17: "K", 20: "BENCH", 21: "IR", 23: "FLEX"}
 STARTER_TEMPLATE = [("QB", 1), ("RB", 2), ("WR", 2), ("TE", 1), ("FLEX", 1), ("D/ST", 1), ("K", 1)]
 
+# Bench churn should be conservative: only recommend replacing a rostered
+# player when the incoming player has both a meaningful absolute edge and a
+# meaningful relative edge. D/ST is intentionally more aggressive because
+# streaming defenses by weekly matchup is normal strategy.
+WAIVER_MIN_POINTS = 3.0
+WAIVER_MIN_RELATIVE_GAIN = 0.20
+DST_STREAM_MIN_POINTS = 1.0
+
 
 def cookies() -> dict[str, str] | None:
     if ESPN_S2 and SWID:
@@ -164,6 +172,13 @@ def fmt_points(value: float | None) -> str:
     return "   —" if value is None else f"{value:5.1f}"
 
 
+def meaningful_bench_upgrade(new_points: float, old_points: float) -> bool:
+    gain = new_points - old_points
+    baseline = max(abs(old_points), 1.0)
+    relative_gain = gain / baseline
+    return gain >= WAIVER_MIN_POINTS and relative_gain >= WAIVER_MIN_RELATIVE_GAIN
+
+
 def main() -> None:
     league = fetch_league()
     week = current_week(league)
@@ -223,22 +238,27 @@ def main() -> None:
         bench_pos = sorted([p for p in bench if p["position"] == pos and p["projected"] is not None], key=score_key)
         if fa and bench_pos:
             weakest = bench_pos[0]
-            gain = float(fa["projected"]) - float(weakest["projected"])
-            if gain >= 1.0:
+            new_points = float(fa["projected"])
+            old_points = float(weakest["projected"])
+            gain = new_points - old_points
+            if meaningful_bench_upgrade(new_points, old_points):
                 suggestions.append((gain, fa, weakest))
     suggestions.sort(reverse=True, key=lambda item: item[0])
     if suggestions:
         for gain, fa, weakest in suggestions[:5]:
             print(f"  +{gain:4.1f}: {fa['name']} ({fa['position']}, {fa['projected']:.1f}) over {weakest['name']} ({weakest['projected']:.1f})")
     else:
-        print("  No >1.0 projected-point bench upgrades found.")
+        print(
+            "  No conservative bench upgrades found "
+            f"(requires >= {WAIVER_MIN_POINTS:.1f} points and >= {WAIVER_MIN_RELATIVE_GAIN:.0%} improvement)."
+        )
 
     roster_dst = next((p for p in roster if p["position"] == "D/ST"), None)
     best_dst = next((p for p in free_agents if p["position"] == "D/ST"), None)
     print("\nD/ST STREAMING")
     if roster_dst and best_dst and roster_dst["projected"] is not None:
         gain = float(best_dst["projected"]) - float(roster_dst["projected"])
-        if gain >= 1.0:
+        if gain >= DST_STREAM_MIN_POINTS:
             print(f"  Consider {best_dst['name']} ({best_dst['projected']:.1f}) over {roster_dst['name']} ({roster_dst['projected']:.1f}); +{gain:.1f} projected.")
         else:
             print(f"  Keep {roster_dst['name']} for now; best available is only {best_dst['name']} ({best_dst['projected']:.1f}).")
