@@ -179,6 +179,17 @@ def meaningful_bench_upgrade(new_points: float, old_points: float) -> bool:
     return gain >= WAIVER_MIN_POINTS and relative_gain >= WAIVER_MIN_RELATIVE_GAIN
 
 
+def safe_drop_candidate(player: dict[str, Any]) -> bool:
+    """Only compare healthy bench players as potential waiver drops.
+
+    ESPN often sets the current-week projection to zero for injured players.
+    Treating that zero as talent/value would create misleading suggestions
+    such as dropping a high-value DOUBTFUL player for a short-term fill-in.
+    Injured players are surfaced separately in INJURY WATCH.
+    """
+    return player.get("injury") in ("ACTIVE", "NORMAL")
+
+
 def main() -> None:
     league = fetch_league()
     week = current_week(league)
@@ -235,7 +246,16 @@ def main() -> None:
     suggestions = []
     for pos in ("RB", "WR", "TE", "QB"):
         fa = next((p for p in free_agents if p["position"] == pos), None)
-        bench_pos = sorted([p for p in bench if p["position"] == pos and p["projected"] is not None], key=score_key)
+        bench_pos = sorted(
+            [
+                p
+                for p in bench
+                if p["position"] == pos
+                and p["projected"] is not None
+                and safe_drop_candidate(p)
+            ],
+            key=score_key,
+        )
         if fa and bench_pos:
             weakest = bench_pos[0]
             new_points = float(fa["projected"])
