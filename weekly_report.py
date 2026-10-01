@@ -32,6 +32,14 @@ WAIVER_MIN_POINTS = 3.0
 WAIVER_MIN_RELATIVE_GAIN = 0.20
 DST_STREAM_MIN_POINTS = 1.0
 
+# The stash watch is intentionally not a transaction recommendation. It finds
+# available skill players who are becoming interesting before they clear the
+# conservative "drop someone for him" threshold.
+STASH_MIN_PROJECTION = 7.0
+STASH_MIN_OWNED = 3.0
+STASH_MAX_OWNED = 65.0
+STASH_LIMIT = 6
+
 
 def cookies() -> dict[str, str] | None:
     if ESPN_S2 and SWID:
@@ -119,6 +127,7 @@ def normalize_pool_entry(entry: dict[str, Any], week: int) -> dict[str, Any]:
         "on_team_id": entry.get("onTeamId") or pool.get("onTeamId") or 0,
         "projected": projection(player, week),
         "owned": float(ownership.get("percentOwned") or 0),
+        "owned_change": float(ownership.get("percentChange") or 0),
     }
 
 
@@ -272,6 +281,37 @@ def main() -> None:
             "  No conservative bench upgrades found "
             f"(requires >= {WAIVER_MIN_POINTS:.1f} points and >= {WAIVER_MIN_RELATIVE_GAIN:.0%} improvement)."
         )
+
+    print("\nUPSIDE / STASH WATCH")
+    stash_candidates = [
+        p
+        for p in free_agents
+        if p["position"] in ("RB", "WR", "TE")
+        and p["injury"] in ("ACTIVE", "NORMAL")
+        and p["projected"] is not None
+        and float(p["projected"]) >= STASH_MIN_PROJECTION
+        and STASH_MIN_OWNED <= float(p["owned"]) <= STASH_MAX_OWNED
+    ]
+
+    def stash_score(player: dict[str, Any]) -> float:
+        # Projection keeps the list relevant this week, while ownership and
+        # especially positive ownership movement reward emerging players.
+        return (
+            float(player["projected"])
+            + min(float(player["owned"]), 50.0) * 0.03
+            + max(float(player["owned_change"]), 0.0) * 0.50
+        )
+
+    stash_candidates.sort(key=lambda p: (stash_score(p), score_key(p)), reverse=True)
+    if stash_candidates:
+        for p in stash_candidates[:STASH_LIMIT]:
+            trend = float(p["owned_change"])
+            print(
+                f"  - {p['name']} ({p['position']}): {p['projected']:.1f} proj, "
+                f"{p['owned']:.1f}% rostered, {trend:+.1f}% trend — monitor; no automatic drop recommended"
+            )
+    else:
+        print("  No notable healthy skill-position stashes found from ESPN ownership/projection signals.")
 
     roster_dst = next((p for p in roster if p["position"] == "D/ST"), None)
     best_dst = next((p for p in free_agents if p["position"] == "D/ST"), None)
