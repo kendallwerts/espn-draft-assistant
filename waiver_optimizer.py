@@ -45,13 +45,40 @@ def best_lineup(roster: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def safe_drops(roster: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Conservative shortlist; no claim is an automatic transaction.
+
+    Weekly projections cannot establish season-long player value. Protect
+    productive bench players, all injured/IR players, defenses, and scarce RBs.
+    """
+    healthy_rbs = sum(
+        p.get("position") == "RB"
+        and p.get("slot") != "IR"
+        and str(p.get("injury", "ACTIVE")).upper() not in UNAVAILABLE
+        for p in roster
+    )
+    result = []
+    for p in roster:
+        if p.get("slot") != "BENCH" or p.get("position") == "D/ST":
+            continue
+        if str(p.get("injury", "ACTIVE")).upper() not in ("ACTIVE", "NORMAL"):
+            continue
+        if p.get("position") == "RB" and healthy_rbs <= 5:
+            continue
+        projected = p.get("projected")
+        if projected is None or float(projected) >= 8.0:
+            continue
+        result.append(p)
+    return sorted(result, key=lambda p: float(p["projected"]))
+
+
 def rank_claims(roster: list[dict[str, Any]],
                 pool: list[dict[str, Any]],
                 *, limit: int = 12) -> dict[str, Any]:
-    """Evaluate add/drop pairs and return mutually exclusive ranked alternatives.
+    """Rank distinct incoming players, with a safe drop and backup drop options.
 
-    Probabilities are deliberately omitted: waiver order and opponent intent are
-    not observable in this input. No transaction is submitted.
+    Claim-success probabilities require data not supplied by ESPN's pool.
+    The demand indicator is descriptive, not a calibrated probability.
     """
     baseline = best_lineup(roster)
     owned_ids = {p.get("id") for p in roster}
@@ -61,16 +88,10 @@ def rank_claims(roster: list[dict[str, Any]],
         and p.get("on_team_id") in (0, -1, None)
         and eligible(p)
     ]
-    # Never drop IR, injured players, or a starting player automatically.
-    # Defenses are also protected from automatic drops; user can decide to stream.
-    drops = [
-        p for p in roster
-        if p.get("slot") == "BENCH"
-        and p.get("position") != "D/ST"
-        and str(p.get("injury", "ACTIVE")).upper() in ("ACTIVE", "NORMAL")
-    ]
+    drops = safe_drops(roster)
     candidates = []
     for incoming in available:
+        options = []
         for outgoing in drops:
             changed = [p for p in roster if p.get("id") != outgoing.get("id")] + [
                 {**incoming, "slot": "BENCH"}
@@ -79,29 +100,37 @@ def rank_claims(roster: list[dict[str, Any]],
             gain = round(optimized["projected_points"] - baseline["projected_points"], 2)
             if gain <= 0:
                 continue
-            # Demand proxy, not an empirical success probability.
-            demand = round(min(100, max(0, float(incoming.get("owned") or 0)
-                                       + 2 * max(0, float(incoming.get("owned_change") or 0)))), 1)
-            candidates.append({
-                "add": incoming["name"], "add_id": incoming.get("id"),
-                "position": incoming["position"],
-                "drop": outgoing["name"], "drop_id": outgoing.get("id"),
-                "lineup_gain": gain,
-                "new_projected_points": optimized["projected_points"],
-                "demand_indicator": demand,
-                "new_lineup": optimized["starters"],
-                "caution": "Evaluate rest-of-season value before submitting; projection-only model.",
-            })
-    # Prioritize actual lineup gains; tie-break with lower demand.
+            options.append((gain, outgoing, optimized))
+        if not options:
+            continue
+        options.sort(key=lambda item: (-item[0], float(item[1]["projected"])))
+        gain, outgoing, optimized = options[0]
+        demand = round(min(100, max(0, float(incoming.get("owned") or 0)
+                                   + 2 * max(0, float(incoming.get("owned_change") or 0)))), 1)
+        candidates.append({
+            "add": incoming["name"], "add_id": incoming.get("id"),
+            "position": incoming["position"],
+            "drop": outgoing["name"], "drop_id": outgoing.get("id"),
+            "backup_drops": [
+                {"name": other["name"], "id": other.get("id"), "lineup_gain": other_gain}
+                for other_gain, other, _ in options[1:4]
+            ],
+            "lineup_gain": gain,
+            "new_projected_points": optimized["projected_points"],
+            "demand_indicator": demand,
+            "new_lineup": optimized["starters"],
+            "caution": "Manual review required: weekly projections do not measure season-long value.",
+        })
     candidates.sort(key=lambda c: (-c["lineup_gain"], c["demand_indicator"]))
     return {
         "current_lineup": baseline,
         "claims": candidates[:limit],
         "notes": [
-            "Ranked claims are alternatives, not simultaneously executable transactions.",
-            "Weekly resetting priority means there is no future priority to preserve.",
-            "Demand indicator is a heuristic, not a probability of claim success.",
-            "Only healthy bench non-D/ST players are considered automatic drops.",
-            "No projections for future weeks or verified opponents' needs are included.",
+            "Each ranked claim targets a different incoming player; backup drops are alternatives.",
+            "Weekly waiver priority resets; no future priority is banked.",
+            "Demand indicator is a heuristic, not a claim-success probability.",
+            "Protect IR, injured players, defenses, productive bench players and thin RB depth.",
+            "If no safe drop exists, show no claim rather than recommend sacrificing a valuable player.",
+            "No verified rest-of-season value or opponent waiver intent is available.",
         ],
     }

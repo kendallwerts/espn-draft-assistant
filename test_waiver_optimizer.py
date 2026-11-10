@@ -43,6 +43,22 @@ class WaiverOptimizerTests(unittest.TestCase):
         result = rank_claims(self.roster, pool)
         self.assertFalse(any(c["drop"] in ("Steelers", "Giants", "Injured Star") for c in result["claims"]))
 
+    def test_distinct_incoming_players_and_safe_drops(self):
+        pool = [
+            player(13, "QB A", "QB", 18),
+            player(14, "QB B", "QB", 16),
+        ]
+        result = rank_claims(self.roster, pool)
+        self.assertEqual([c["add"] for c in result["claims"]], ["QB A", "QB B"])
+        self.assertTrue(all(c["drop"] == "Drop WR" for c in result["claims"]))
+        self.assertFalse(any(c["drop"] in ("Breece Hall", "Jordan Addison", "Rico Dowdle")
+                             for c in result["claims"]))
+
+    def test_no_safe_drop_means_no_claim(self):
+        roster = [p for p in self.roster if p["name"] != "Drop WR"]
+        result = rank_claims(roster, [player(13, "QB A", "QB", 18)])
+        self.assertEqual(result["claims"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -246,123 +246,21 @@ def main() -> None:
     print("  CAUTION: Claims are alternatives; demand is not claim probability.")
     print("  Full roster and free-agent snapshot: fantasy_snapshot.json")
 
-    print("=" * 78)
-    print(f"WEEK {week} FANTASY REPORT")
-    print(f"Team: {team.get('name') or team.get('nickname') or TEAM_ID}")
-    print("=" * 78)
-
-    recommended = recommend_lineup(roster)
-    print("\nRECOMMENDED LINEUP (ESPN projected points)")
-    print(f"{'SLOT':<6} {'PLAYER':<28} {'POS':<4} {'PROJ':>5}  STATUS")
-    print("-" * 62)
-    for slot, player in recommended:
-        print(f"{slot:<6} {player['name'][:28]:<28} {player['position']:<4} {fmt_points(player['projected'])}  {player['injury']}")
-
-    current_by_id = {p["id"]: p["slot"] for p in roster if p["slot"] not in ("BENCH", "IR")}
-    changes = []
-    for slot, player in recommended:
-        current_slot = current_by_id.get(player["id"])
-        if current_slot is None:
-            changes.append(f"START {player['name']} at {slot} (currently bench/IR)")
-        elif current_slot != slot and not ({current_slot, slot} <= {"RB", "WR", "FLEX"}):
-            changes.append(f"Move {player['name']} from {current_slot} to {slot}")
-
-    print("\nLINEUP CHANGES")
-    if changes:
-        for change in changes:
-            print(f"  - {change}")
-    else:
-        print("  No obvious changes based on ESPN projections.")
-
-    watch = [p for p in roster if p["injury"] not in ("ACTIVE", "NORMAL")]
-    print("\nINJURY WATCH")
-    if watch:
-        for p in sorted(watch, key=lambda x: x["name"]):
-            print(f"  - {p['name']} ({p['position']}): {p['injury']}")
-    else:
-        print("  No roster injury flags.")
-
-    free_agents = [p for p in pool if p.get("on_team_id") in (0, None, -1) and p["projected"] is not None]
-    free_agents.sort(key=score_key, reverse=True)
-    bench = [p for p in roster if p["slot"] == "BENCH"]
-
-    print("\nWAIVER / FREE-AGENT UPGRADES")
-    suggestions = []
-    for pos in ("RB", "WR", "TE", "QB"):
-        fa = next((p for p in free_agents if p["position"] == pos), None)
-        bench_pos = sorted(
-            [
-                p
-                for p in bench
-                if p["position"] == pos
-                and p["projected"] is not None
-                and safe_drop_candidate(p)
-            ],
-            key=score_key,
-        )
-        if fa and bench_pos:
-            weakest = bench_pos[0]
-            new_points = float(fa["projected"])
-            old_points = float(weakest["projected"])
-            gain = new_points - old_points
-            if meaningful_bench_upgrade(new_points, old_points):
-                suggestions.append((gain, fa, weakest))
-    suggestions.sort(reverse=True, key=lambda item: item[0])
-    if suggestions:
-        for gain, fa, weakest in suggestions[:5]:
-            print(f"  +{gain:4.1f}: {fa['name']} ({fa['position']}, {fa['projected']:.1f}) over {weakest['name']} ({weakest['projected']:.1f})")
-    else:
-        print(
-            "  No conservative bench upgrades found "
-            f"(requires >= {WAIVER_MIN_POINTS:.1f} points and >= {WAIVER_MIN_RELATIVE_GAIN:.0%} improvement)."
-        )
-
-    print("\nUPSIDE / STASH WATCH")
-    stash_candidates = [
-        p
-        for p in free_agents
-        if p["position"] in ("RB", "WR", "TE")
-        and p["injury"] in ("ACTIVE", "NORMAL")
-        and p["projected"] is not None
-        and float(p["projected"]) >= STASH_MIN_PROJECTION
-        and STASH_MIN_OWNED <= float(p["owned"]) <= STASH_MAX_OWNED
-    ]
-
-    def stash_score(player: dict[str, Any]) -> float:
-        # Projection keeps the list relevant this week, while ownership and
-        # especially positive ownership movement reward emerging players.
-        return (
-            float(player["projected"])
-            + min(float(player["owned"]), 50.0) * 0.03
-            + max(float(player["owned_change"]), 0.0) * 0.50
-        )
-
-    stash_candidates.sort(key=lambda p: (stash_score(p), score_key(p)), reverse=True)
-    if stash_candidates:
-        for p in stash_candidates[:STASH_LIMIT]:
-            trend = float(p["owned_change"])
-            print(
-                f"  - {p['name']} ({p['position']}): {p['projected']:.1f} proj, "
-                f"{p['owned']:.1f}% rostered, {trend:+.1f}% trend — monitor; no automatic drop recommended"
-            )
-    else:
-        print("  No notable healthy skill-position stashes found from ESPN ownership/projection signals.")
-
-    roster_dst = next((p for p in roster if p["position"] == "D/ST"), None)
-    best_dst = next((p for p in free_agents if p["position"] == "D/ST"), None)
-    print("\nD/ST STREAMING")
-    if roster_dst and best_dst and roster_dst["projected"] is not None:
-        gain = float(best_dst["projected"]) - float(roster_dst["projected"])
-        if gain >= DST_STREAM_MIN_POINTS:
-            print(f"  Consider {best_dst['name']} ({best_dst['projected']:.1f}) over {roster_dst['name']} ({roster_dst['projected']:.1f}); +{gain:.1f} projected.")
-        else:
-            print(f"  Keep {roster_dst['name']} for now; best available is only {best_dst['name']} ({best_dst['projected']:.1f}).")
-    else:
-        print("  Not enough ESPN projection data to compare defenses.")
-
-    missing = sum(1 for p in roster if p["projected"] is None)
-    if missing:
-        print(f"\nNOTE: ESPN did not return a Week {week} projection for {missing} rostered player(s); those players are shown with — and should be reviewed manually.")
+    print("\\nCURRENT VS OPTIMIZED LINEUP CHANGES")
+    current_starters = {p["id"]: p for p in roster if p["slot"] not in ("BENCH", "IR")}
+    for p in optimization["current_lineup"]["starters"]:
+        previous = current_starters.get(p["id"])
+        if previous is None:
+            print(f"  START {p['name']} at {p['slot']} (currently bench)")
+    print("\\nWAIVER CLAIM FALLBACK DETAILS")
+    for claim in optimization["claims"]:
+        backups = ", ".join(p["name"] for p in claim["backup_drops"]) or "none"
+        print(f"  {claim['add']}: drop {claim['drop']}; alternate drops: {backups}")
+    for note in optimization["notes"]:
+        print(f"  NOTE: {note}")
+    if any(p["position"] == "QB" and float(p.get("projected") or 0) == 0
+           for p in optimization["current_lineup"]["starters"]):
+        print("  WARNING: Starting QB has a zero projection; verify bye/injury and ESPN status.")
 
 
 if __name__ == "__main__":
