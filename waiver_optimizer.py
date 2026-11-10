@@ -26,7 +26,7 @@ def best_lineup(roster: list[dict[str, Any]]) -> dict[str, Any]:
         choices = sorted((p for p in remaining if p["position"] == position),
                          key=lambda p: float(p["projected"]), reverse=True)
         for player in choices[:count]:
-            chosen.append({"slot": position, **player})
+            chosen.append({**player, "slot": position})
             remaining.remove(player)
         missing.extend([position] * (count - min(count, len(choices))))
 
@@ -35,7 +35,7 @@ def best_lineup(roster: list[dict[str, Any]]) -> dict[str, Any]:
     flex = sorted((p for p in remaining if p["position"] in ("RB", "WR", "TE")),
                   key=lambda p: float(p["projected"]), reverse=True)
     if flex:
-        chosen.append({"slot": "FLEX", **flex[0]})
+        chosen.append({**flex[0], "slot": "FLEX"})
     else:
         missing.append("FLEX")
     return {
