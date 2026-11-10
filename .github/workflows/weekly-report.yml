@@ -30,6 +30,9 @@ jobs:
       - name: Install dependencies
         run: poetry install
 
+      - name: Test waiver optimizer
+        run: poetry run python -m unittest test_waiver_optimizer.py
+
       - name: Generate weekly fantasy report
         run: poetry run python weekly_report.py
 
