@@ -32,3 +32,11 @@ jobs:
 
       - name: Generate weekly fantasy report
         run: poetry run python weekly_report.py
+
+      - name: Upload complete fantasy snapshot
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fantasy-snapshot
+          path: fantasy_snapshot.json
+          retention-days: 14
