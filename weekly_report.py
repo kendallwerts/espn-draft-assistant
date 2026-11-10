@@ -6,6 +6,8 @@ from typing import Any
 
 import requests
 
+from waiver_optimizer import rank_claims
+
 SEASON = int(os.getenv("ESPN_SEASON", "2026"))
 LEAGUE_ID = os.getenv("ESPN_LEAGUE_ID")
 TEAM_ID = int(os.getenv("ESPN_TEAM_ID", "13"))
@@ -128,6 +130,7 @@ def normalize_pool_entry(entry: dict[str, Any], week: int) -> dict[str, Any]:
         "projected": projection(player, week),
         "owned": float(ownership.get("percentOwned") or 0),
         "owned_change": float(ownership.get("percentChange") or 0),
+        "availability_status": entry.get("status") or pool.get("status") or "UNKNOWN",
     }
 
 
@@ -210,6 +213,38 @@ def main() -> None:
         sys.exit(f"Team {TEAM_ID} not found")
     roster_entries = (team.get("roster") or {}).get("entries") or []
     roster = [normalize_roster_entry(entry, pool_by_id) for entry in roster_entries]
+
+    optimization = rank_claims(roster, pool)
+    snapshot = {
+        "season": SEASON, "week": week, "team_id": TEAM_ID,
+        "roster": {
+            "starters": [p for p in roster if p["slot"] not in ("BENCH", "IR")],
+            "bench": [p for p in roster if p["slot"] == "BENCH"],
+            "injured_reserve": [p for p in roster if p["slot"] == "IR"],
+        },
+        "available_players": [p for p in pool if p.get("on_team_id") in (0, -1, None)],
+        "optimizer": optimization,
+    }
+    with open("fantasy_snapshot.json", "w", encoding="utf-8") as output:
+        json.dump(snapshot, output, indent=2)
+    print("\\nFULL CURRENT ROSTER")
+    for label, players in snapshot["roster"].items():
+        print(f"  {label.upper()} ({len(players)}):")
+        for p in players:
+            print(f"    {p['slot']:<6} {p['name']:<28} {p['position']:<4} {fmt_points(p['projected'])} {p['injury']}")
+    print("\\nOPTIMIZED CURRENT LINEUP")
+    for p in optimization["current_lineup"]["starters"]:
+        print(f"  {p['slot']:<6} {p['name']:<28} {fmt_points(p['projected'])}")
+    print(f"  TOTAL: {optimization['current_lineup']['projected_points']:.1f}")
+    if optimization["current_lineup"]["unfilled_slots"]:
+        print(f"  UNFILLED: {optimization['current_lineup']['unfilled_slots']}")
+    print("\\nRANKED WAIVER CLAIM ALTERNATIVES (not submitted)")
+    for i, claim in enumerate(optimization["claims"], 1):
+        print(f"  {i}. ADD {claim['add']} / DROP {claim['drop']}: "
+              f"+{claim['lineup_gain']:.1f} lineup pts; "
+              f"demand indicator {claim['demand_indicator']:.0f}/100")
+    print("  CAUTION: Claims are alternatives; demand is not claim probability.")
+    print("  Full roster and free-agent snapshot: fantasy_snapshot.json")
 
     print("=" * 78)
     print(f"WEEK {week} FANTASY REPORT")
