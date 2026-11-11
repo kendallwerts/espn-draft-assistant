@@ -36,7 +36,7 @@ class WaiverOptimizerTests(unittest.TestCase):
         pool = [player(13, "New RB", "RB", 13)]
         result = rank_claims(self.roster, pool)
         claim = next(c for c in result["claims"] if c["add"] == "New RB" and c["drop"] == "Drop WR")
-        self.assertEqual(claim["lineup_gain"], 3)
+        # The new RB takes RB2, moving the old RB2 to FLEX over the 9-point WR.\n        # Net lineup improvement: 13 - 9 = 4.\n        self.assertEqual(claim["lineup_gain"], 4)
 
     def test_no_automatic_defense_or_injured_drops(self):
         pool = [player(14, "Great RB", "RB", 25)]
